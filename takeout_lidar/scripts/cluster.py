@@ -14,26 +14,27 @@ from visualization_msgs.msg import Marker, MarkerArray
 def velodyne_callback(msg):
     # PointCloud2 메시지에서 데이터 읽기
     pc_data = list(pc2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True))
-
-    # 필터링 조건 설정
+    ## roi 연산 (현재 X축 : 0 ~ 4m, Y축 : -2 ~ 2m)
     filtered_data = [point for point in pc_data if ((0 <= point[0] <= 4) & (-2 <= point[1] <= 2))]
-
-    # 필터링된 데이터에서 xyz 좌표만 추출하여 클러스터링을 수행
+    ## roi된 데이터에서 xyz 좌표만 추출하여 클러스터링을 수행
     points = np.array([[point[0], point[1], point[2]] for point in filtered_data])
+
+    ## DBSCAN 연산 수행 (현재 반경 : 0.2m, 최소 점 개수 : 10개)
     clustering = DBSCAN(eps=0.2, min_samples=10).fit(points)
 
-    # 클러스터링 결과를 시각화하기 위한 Marker 생성
+    ## 클러스터링 결과를 시각화하기 위한 마커 생성
     marker_array = create_cluster_markers(clustering.labels_, filtered_data)
 
-    # 클러스터링 결과와 시각화 정보를 퍼블리시
+    ## 클러스터링 결과와 시각화 정보를 퍼블리시
     pub.publish(create_clustered_point_cloud(filtered_data, clustering.labels_, msg.header))
     marker_pub.publish(marker_array)
 
+## 시각화 마커 생성 함수
 def create_cluster_markers(labels, data):
     marker_array = MarkerArray()
     unique_labels = set(labels)
     color_id = 0
-
+    print(f"== Cluster Points ==")
     for label in unique_labels:
         if label == -1:  # 노이즈 포인트는 건너뜀
             continue
@@ -46,7 +47,10 @@ def create_cluster_markers(labels, data):
         # 클러스터 중심 계산
         cluster_center = np.mean(cluster_points, axis=0)[:3]
 
-        # 클러스터를 시각화하는 Marker 생성
+        # 클러스터링된 각 클러스터의 점 좌표를 출력
+        print(f"Cluster {label} - Center: X: {cluster_center[0]}, Y: {cluster_center[1]}")
+
+        # 클러스터를 시각화하는 Marker 생성 (군집의 중점에 반지름 0.2m 크기의 구체 생성)
         marker = Marker()
         marker.header.frame_id = "laser_frame"
         marker.type = Marker.SPHERE
@@ -67,11 +71,12 @@ def create_cluster_markers(labels, data):
 
     return marker_array
 
+## DBSCAN 연산 수행 후 rviz에서 시각화하기 위해 변환
 def create_clustered_point_cloud(data, labels, header):
     cluster_cloud = PointCloud2()
     cluster_cloud.header = header
 
-    # 클러스터링 결과에 따라 width 값을 설정
+    ## 클러스터링 결과에 따라 width 값을 설정
     cluster_cloud.width = len(labels)
 
     fields = [PointField('x', 0, PointField.FLOAT32, 1),
@@ -95,7 +100,7 @@ def create_clustered_point_cloud(data, labels, header):
 
 
 if __name__ == "__main__":
-    rospy.init_node("point_cloud_processing_node")
+    rospy.init_node("clustering_node")
     
     # /roi_cloud 토픽을 구독하여 데이터 수신
     rospy.Subscriber("/cloud", PointCloud2, velodyne_callback, queue_size=10)
